@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:batch="http://www.springframework.org/schema/batch"
+	xmlns:tx="http://www.springframework.org/schema/tx"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+		http://www.springframework.org/schema/batch http://www.springframework.org/schema/batch/spring-batch.xsd
+		http://www.springframework.org/schema/tx http://www.springframework.org/schema/tx/spring-tx-3.2.xsd">
+		
+	<bean id="repositoryDataSource"
+		class="org.apache.commons.dbcp.BasicDataSource"
+		destroy-method="close">
+		<property name="driverClassName" value="oracle.jdbc.OracleDriver" />
+		<property name="url" value="jdbc:oracle:thin:@guest01:1521:myora" />
+		<property name="username" value="scott" />
+		<property name="password" value="tiger" />
+        <property name="initialSize" value="2" />
+        <property name="minIdle" value="2" />
+        <property name="maxActive" value="10" />
+        <property name="maxIdle" value="5" />
+	</bean>
+	
+	<bean id="testDataSource"
+		class="org.apache.commons.dbcp.BasicDataSource"
+		destroy-method="close">
+		<property name="driverClassName" value="oracle.jdbc.OracleDriver" />
+		<!-- 
+		<property name="driverClassName" value="net.sf.log4jdbc.DriverSpy" />
+		 -->
+		<property name="url" value="jdbc:oracle:thin:@guest01:1521:myora" />
+<!-- 
+		<property name="url" value="jdbc:log4jdbc:oracle:thin:@guest01:1521:myora" />
+ -->		
+		<property name="username" value="scott" />
+		<property name="password" value="tiger" />
+        <property name="initialSize" value="2" />
+        <property name="minIdle" value="2" />
+        <property name="maxActive" value="10" />
+        <property name="maxIdle" value="5" />        
+	</bean>		
+
+	<bean id="repositoryTransactionManager" lazy-init="true" 
+		class="org.springframework.jdbc.datasource.DataSourceTransactionManager">
+		<property name="dataSource" ref="repositoryDataSource" />
+	</bean>
+	
+	<bean id="testTransactionManager" lazy-init="true" 
+		class="org.springframework.jdbc.datasource.DataSourceTransactionManager">
+		<property name="dataSource" ref="testDataSource" />
+	</bean>	
+	
+	<batch:job-repository id="jobRepository" 
+		data-source="repositoryDataSource"
+		transaction-manager="repositoryTransactionManager"
+		isolation-level-for-create="READ_COMMITTED"
+		table-prefix="BATCH_"
+	/>
+	
+	<bean id="jobLauncher" class="org.springframework.batch.core.launch.support.SimpleJobLauncher">
+		<property name="jobRepository" ref="jobRepository" />
+	</bean>
+		
+	<batch:job id="TestJob02" job-repository="jobRepository">
+		<batch:step id="SimpleStep">
+			<batch:tasklet transaction-manager="testTransactionManager" allow-start-if-complete="true">
+				<batch:chunk
+					reader="TestReader"
+					processor="TestProcessor"
+					writer="TestWriter"
+					commit-interval="1"
+					reader-transactional-queue="false"
+				/>
+			</batch:tasklet>
+		</batch:step>
+	</batch:job>
+	
+	<bean id="SourceMapper"
+		class="test.rowmapper.TbSourceMapper"/>
+		
+	<bean id="ParameterSetter" class="test.reader.TestParameterSetter" scope="step">
+		<property name="param" value="#{jobParameters['param1']}"/>
+	</bean>
+			
+	<bean id="TestReader"
+		class="org.springframework.batch.item.database.JdbcCursorItemReader"
+        scope="step">
+		<property name="dataSource" ref="testDataSource"/>
+		<property name="sql"
+			value="SELECT COL1, COL2, COL3
+				FROM TB_SOURCE
+				WHERE COL1 = ?"/>
+		<property name="rowMapper"
+			ref="SourceMapper"/>
+		<property name="preparedStatementSetter" ref="ParameterSetter"/>			
+		<property name="fetchSize" value="100" />
+		<property name="maxRows" value="0" />
+	</bean>
+	
+	<bean id="TestProcessor" 
+        class="test.processor.TestProcessor" 
+        scope="step">
+	</bean>
+    
+	<bean id="TestWriter"
+		class="org.springframework.batch.item.database.JdbcBatchItemWriter"
+        scope="step">
+		<property name="assertUpdates" value="true" />
+		<property name="itemSqlParameterSourceProvider">
+			<bean class="org.springframework.batch.item.database.BeanPropertyItemSqlParameterSourceProvider" />
+		</property>
+		<property name="sql"
+			value="INSERT INTO TB_TARGET(NEW_COL1, NEW_COL2, NEW_COL3) 
+  			VALUES(:newCol1, :newCol2, :newCol3)"
+		 />
+		<property name="dataSource" ref="testDataSource" />
+	</bean>
+
+</beans>
