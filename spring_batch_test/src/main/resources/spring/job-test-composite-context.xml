@@ -23,16 +23,8 @@
 	<bean id="testDataSource"
 		class="org.apache.commons.dbcp.BasicDataSource"
 		destroy-method="close">
-		<!-- 
 		<property name="driverClassName" value="oracle.jdbc.OracleDriver" />
-		 -->
-		<property name="driverClassName" value="net.sf.log4jdbc.DriverSpy" />
-
-<!-- 
 		<property name="url" value="jdbc:oracle:thin:@guest01:1521:myora" />
- -->
-		<property name="url" value="jdbc:log4jdbc:oracle:thin:@guest01:1521:myora" />
-
 		<property name="username" value="scott" />
 		<property name="password" value="tiger" />
         <property name="initialSize" value="2" />
@@ -62,13 +54,13 @@
 		<property name="jobRepository" ref="jobRepository" />
 	</bean>
 		
-	<batch:job id="TestJob01" job-repository="jobRepository">
+	<batch:job id="TestCompositeJob" job-repository="jobRepository">
 		<batch:step id="SimpleStep">
 			<batch:tasklet transaction-manager="testTransactionManager" allow-start-if-complete="true">
 				<batch:chunk
 					reader="TestReader"
 					processor="TestProcessor"
-					writer="TestWriter"
+					writer="TestCompositeWriter"
 					commit-interval="1"
 					reader-transactional-queue="false"
 				/>
@@ -78,16 +70,22 @@
 	
 	<bean id="SourceMapper"
 		class="test.rowmapper.TbSourceMapper"/>
-	
+		
+	<bean id="ParameterSetter" class="test.reader.TestParameterSetter" scope="step">
+		<property name="param" value="#{jobParameters['param1']}"/>
+	</bean>
+			
 	<bean id="TestReader"
 		class="org.springframework.batch.item.database.JdbcCursorItemReader"
         scope="step">
 		<property name="dataSource" ref="testDataSource"/>
 		<property name="sql"
 			value="SELECT COL1, COL2, COL3
-				FROM TB_SOURCE"/>
+				FROM TB_SOURCE
+				WHERE COL1 = ?"/>
 		<property name="rowMapper"
 			ref="SourceMapper"/>
+		<property name="preparedStatementSetter" ref="ParameterSetter"/>			
 		<property name="fetchSize" value="100" />
 		<property name="maxRows" value="0" />
 	</bean>
@@ -96,8 +94,19 @@
         class="test.processor.TestProcessor" 
         scope="step">
 	</bean>
+	
+    <bean id="TestCompositeWriter" 
+        class="org.springframework.batch.item.support.CompositeItemWriter"
+        scope="step">
+        <property name="delegates">
+            <list>
+                <ref bean="TestWriter1"/>
+                <ref bean="TestWriter2"/>
+            </list>
+        </property>
+    </bean>	
     
-	<bean id="TestWriter"
+	<bean id="TestWriter1"
 		class="org.springframework.batch.item.database.JdbcBatchItemWriter"
         scope="step">
 		<property name="assertUpdates" value="true" />
@@ -105,10 +114,24 @@
 			<bean class="org.springframework.batch.item.database.BeanPropertyItemSqlParameterSourceProvider" />
 		</property>
 		<property name="sql"
-			value="INSERT INTO TB_TARGET(NEW_COL1, NEW_COL2, NEW_COL3) 
-  			VALUES(:newCol1, :newCol2, :newCol3)"
+			value="INSERT INTO TB_TARGET1(NEW_COL1, NEW_COL2) 
+  			VALUES(:newCol1, :newCol2)"
 		 />
 		<property name="dataSource" ref="testDataSource" />
 	</bean>
+	
+	<bean id="TestWriter2"
+		class="org.springframework.batch.item.database.JdbcBatchItemWriter"
+        scope="step">
+		<property name="assertUpdates" value="true" />
+		<property name="itemSqlParameterSourceProvider">
+			<bean class="org.springframework.batch.item.database.BeanPropertyItemSqlParameterSourceProvider" />
+		</property>
+		<property name="sql"
+			value="INSERT INTO TB_TARGET2(NEW_COL1, NEW_COL3) 
+  			VALUES(:newCol1, :newCol3)"
+		 />
+		<property name="dataSource" ref="testDataSource" />
+	</bean>	
 
 </beans>
