@@ -23,16 +23,8 @@
 	<bean id="testDataSource"
 		class="org.apache.commons.dbcp.BasicDataSource"
 		destroy-method="close">
-		<!-- 
 		<property name="driverClassName" value="oracle.jdbc.OracleDriver" />
-		 -->
-		<property name="driverClassName" value="net.sf.log4jdbc.DriverSpy" />
-
-<!-- 
 		<property name="url" value="jdbc:oracle:thin:@guest01:1521:myora" />
- -->
-		<property name="url" value="jdbc:log4jdbc:oracle:thin:@guest01:1521:myora" />
-
 		<property name="username" value="scott" />
 		<property name="password" value="tiger" />
         <property name="initialSize" value="2" />
@@ -62,38 +54,63 @@
 		<property name="jobRepository" ref="jobRepository" />
 	</bean>
 		
-	<batch:job id="TestJob01" job-repository="jobRepository">
-		<batch:step id="SimpleStep">
-			<batch:tasklet transaction-manager="testTransactionManager" allow-start-if-complete="true">
-				<batch:chunk
-					reader="TestReader"
-					processor="TestProcessor"
-					writer="TestWriter"
-					commit-interval="1"
-					reader-transactional-queue="false"
-				/>
-			</batch:tasklet>
-		</batch:step>
+	<batch:job id="TestPartitionJob" job-repository="jobRepository">
+        <batch:step id="TestPartitionStep">
+            <batch:partition step="SingleStep" partitioner="DayOfWeekPartitioner">
+                <batch:handler grid-size="7" task-executor="TaskExecutor" />
+            </batch:partition>
+        </batch:step>
 	</batch:job>
 	
-	<bean id="SourceMapper"
-		class="test.rowmapper.TbSourceMapper"/>
+    <bean id="DayOfWeekPartitioner" 
+        class="test.reader.DayOfWeekPartitioner" 
+        scope="step">
+    </bean>	
+    
+    <bean id="TaskExecutor" 
+        class="org.springframework.core.task.SimpleAsyncTaskExecutor"
+        scope="step">
+        <constructor-arg type="java.lang.String" value="test-executor"/>
+        <property name="concurrencyLimit" value="20"/>
+    </bean>    
 	
+	<batch:step id="SingleStep">
+		<batch:tasklet transaction-manager="testTransactionManager" allow-start-if-complete="true">
+			<batch:chunk
+				reader="TestReader"
+				processor="TestProcessor"
+				writer="TestWriter"
+				commit-interval="1"
+				reader-transactional-queue="false"
+			/>
+		</batch:tasklet>
+	</batch:step>	
+	
+	<bean id="SourceMapper"
+		class="test.rowmapper.TbPartitionSourceMapper"/>
+		
+	<bean id="ParameterSetter" class="test.reader.TestPartitionParameterSetter" scope="step">
+		<property name="startParam" value="#{stepExecutionContext['StartDay']}"/>
+		<property name="endParam" value="#{stepExecutionContext['EndDay']}"/>
+	</bean>
+			
 	<bean id="TestReader"
 		class="org.springframework.batch.item.database.JdbcCursorItemReader"
         scope="step">
 		<property name="dataSource" ref="testDataSource"/>
 		<property name="sql"
-			value="SELECT COL1, COL2, COL3
-				FROM TB_SOURCE"/>
+			value="SELECT COL1, COL2
+				FROM TB_PARTITION_SOURCE
+				WHERE DAY_OF_WEEK BETWEEN ? AND ?"/>
 		<property name="rowMapper"
 			ref="SourceMapper"/>
+		<property name="preparedStatementSetter" ref="ParameterSetter"/>			
 		<property name="fetchSize" value="100" />
 		<property name="maxRows" value="0" />
 	</bean>
 	
 	<bean id="TestProcessor" 
-        class="test.processor.TestProcessor" 
+        class="test.processor.TestPartitionProcessor" 
         scope="step">
 	</bean>
     
@@ -105,8 +122,8 @@
 			<bean class="org.springframework.batch.item.database.BeanPropertyItemSqlParameterSourceProvider" />
 		</property>
 		<property name="sql"
-			value="INSERT INTO TB_TARGET(NEW_COL1, NEW_COL2, NEW_COL3) 
-  			VALUES(:newCol1, :newCol2, :newCol3)"
+			value="INSERT INTO TB_PARTITION_TARGET(NEW_COL1, NEW_COL2) 
+  			VALUES(:newCol1, :newCol2)"
 		 />
 		<property name="dataSource" ref="testDataSource" />
 	</bean>
